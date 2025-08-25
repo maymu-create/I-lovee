@@ -1,0 +1,315 @@
+<!DOCTYPE html><html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ตัวละครนอนกลางทุ่งหญ้า – ปากขยับและกลอกตา</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #9ed8ff; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .hint {
+      position: fixed; left: 12px; bottom: 12px; padding: 8px 12px;
+      background: rgba(255,255,255,.8); border-radius: 12px; font-family: ui-sans-serif, system-ui;
+      font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div class="hint">คลิกหรือแตะเพื่อให้ตัวละครกลอกตา / กระพริบเร็วขึ้น</div>
+  <script>
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');// HiDPI scaling
+function resize() {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(canvas.clientWidth * dpr);
+  canvas.height = Math.floor(canvas.clientHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function fitCanvas() {
+  // fill the window
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  resize();
+}
+window.addEventListener('resize', resize);
+fitCanvas();
+
+// --- Scene parameters ---
+let W = () => canvas.clientWidth;
+let H = () => canvas.clientHeight;
+
+// Clouds
+const clouds = Array.from({length: 5}, (_, i) => ({
+  x: Math.random()*W(), y: Math.random()*H()*0.4 + 20,
+  s: Math.random()*0.6 + 0.6, v: Math.random()*0.15 + 0.05
+}));
+
+// Grass blades for subtle sway
+const blades = Array.from({length: 120}, () => ({
+  x: Math.random()*1, // normalized across width
+  h: Math.random()*40 + 40,
+  w: Math.random()*3 + 2,
+  p: Math.random()*Math.PI*2,
+}));
+
+// Character state
+const char = {
+  // Position anchored near lower center
+  x: () => W()*0.5,
+  y: () => H()*0.72,
+  scale: () => Math.max(0.7, Math.min(1.2, W()/1200 + H()/1200)),
+  // eye movement
+  eyePhase: 0,
+  eyeSpeed: 0.8,
+  blink: 0, // 0 open, 1 closed
+  nextBlinkAt: 0,
+  mouthPhase: 0,
+};
+
+function scheduleBlink(t){
+  char.nextBlinkAt = t + 1200 + Math.random()*3000; // 1.2–4.2s
+}
+
+// Drawing helpers
+function skyGradient(){
+  const g = ctx.createLinearGradient(0,0,0,H());
+  g.addColorStop(0, '#87ceff'); // sky blue
+  g.addColorStop(0.6, '#bfe8ff');
+  g.addColorStop(1, '#ffffff');
+  return g;
+}
+
+function drawCloud(x, y, s){
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  const puffs = [[0,0,24],[22,4,16],[-20,6,18],[10,-10,20],[-12,-8,15]];
+  puffs.forEach(([px,py,r])=>{
+    ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawHills(){
+  // distant hills
+  ctx.fillStyle = '#a1d68f';
+  ctx.beginPath();
+  ctx.moveTo(0, H()*0.65);
+  const baseY = H()*0.65;
+  for(let x=0; x<=W(); x+=20){
+    const y = baseY + Math.sin(x*0.004)*12;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W(), H()); ctx.lineTo(0,H()); ctx.closePath(); ctx.fill();
+
+  // nearer meadow
+  const g = ctx.createLinearGradient(0,H()*0.6,0,H());
+  g.addColorStop(0, '#79c86a');
+  g.addColorStop(1, '#4caf50');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, H()*0.68, W(), H());
+}
+
+function drawGrass(t){
+  ctx.save();
+  ctx.translate(0, H()*0.68);
+  ctx.strokeStyle = 'rgba(60,120,40,0.5)';
+  ctx.lineCap = 'round';
+  blades.forEach(b=>{
+    const x = b.x*W();
+    const sway = Math.sin(t*0.002 + b.p)*10;
+    ctx.lineWidth = b.w;
+    ctx.beginPath();
+    ctx.moveTo(x, H()*0.32);
+    ctx.quadraticCurveTo(x+sway*0.5, H()*0.16, x+sway, 0);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawCharacter(t){
+  const s = char.scale();
+  const baseX = char.x();
+  const baseY = char.y();
+
+  ctx.save();
+  // Character is lying on grass, slightly rotated
+  ctx.translate(baseX, baseY);
+  ctx.rotate(-Math.PI/16);
+  ctx.scale(s, s);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(0, 60, 140, 24, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body
+  roundRect(-110, -10, 220, 120, 24, '#ffd5a8', '#e2b88d');
+  // Shirt
+  roundRect(-110, 34, 220, 60, 18, '#7cc7ff', '#5aa8e8');
+
+  // Head
+  ctx.save();
+  ctx.translate(-60, -40);
+  roundRect(-50, -38, 100, 96, 28, '#ffe3c5', '#e1c7a8');
+
+  // Eyes group
+  const eyeY = 4;
+  const eyeGap = 38;
+  const eyeR = 14;
+
+  // Blink (0 open, 1 closed)
+  const blinkAmount = char.blink; // 0..1
+
+  // Eye whites
+  ctx.fillStyle = '#ffffff';
+  eye(-eyeGap, eyeY, eyeR, blinkAmount);
+  eye( eyeGap, eyeY, eyeR, blinkAmount);
+
+  // Pupils move in a slow circle (eye roll)
+  const pupilR = 6;
+  const orbit = 5;
+  const px = Math.cos(char.eyePhase) * orbit;
+  const py = Math.sin(char.eyePhase*1.3) * orbit * 0.7;
+
+  if (blinkAmount < 0.98) {
+    ctx.fillStyle = '#222';
+    circle(-eyeGap + px, eyeY + py, pupilR);
+    circle( eyeGap + px, eyeY + py, pupilR);
+  }
+
+  // Mouth chewing (open/close)
+  const mouthOpen = (Math.sin(char.mouthPhase) * 0.5 + 0.5); // 0..1
+  const mw = 38; const mh = 10 + mouthOpen*10;
+  ctx.fillStyle = '#bc4b4b';
+  roundRect(-mw/2, 30 - mh/2, mw, mh, 6, '#bc4b4b', '#a33d3d');
+
+  // Nose (simple)
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-4,18); ctx.lineTo(0,18); ctx.stroke();
+
+  // Blush
+  ctx.fillStyle = 'rgba(255,120,120,0.18)';
+  ellipse(-eyeGap, 26, 16, 8);
+  ellipse( eyeGap, 26, 16, 8);
+
+  ctx.restore();
+
+  // Simple hair tuft
+  ctx.fillStyle = '#3b2e2e';
+  ctx.beginPath();
+  ctx.moveTo(-105,-32); ctx.quadraticCurveTo(-120,-70,-92,-60);
+  ctx.quadraticCurveTo(-70,-52,-75,-34); ctx.closePath(); ctx.fill();
+
+  // Small breathing motion: lift body up/down subtly
+  ctx.restore();
+}
+
+function roundRect(x,y,w,h,r, fill, stroke){
+  ctx.beginPath();
+  const rr = Math.min(r, w/2, h/2);
+  ctx.moveTo(x+rr,y);
+  ctx.arcTo(x+w,y,x+w,y+h,rr);
+  ctx.arcTo(x+w,y+h,x,y+h,rr);
+  ctx.arcTo(x,y+h,x,y,rr);
+  ctx.arcTo(x,y,x+w,y,rr);
+  if (fill){ ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+}
+function circle(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+function ellipse(x,y,rx,ry){ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2); ctx.fill(); }
+
+function eye(x, y, r, blink){
+  // Eye white
+  ctx.save();
+  ctx.translate(x, y);
+  // simulate blink by scaling Y
+  const sy = Math.max(0.04, 1 - blink*0.96);
+  ctx.scale(1, sy);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(0, 0, r, r*0.85, 0, 0, Math.PI*2); ctx.fill();
+  // Eye outline
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.stroke();
+  ctx.restore();
+
+  // upper eyelid (for closed state)
+  if (blink > 0.85){
+    ctx.fillStyle = '#e1c7a8';
+    ctx.beginPath(); ctx.ellipse(x, y, r+1, r*0.9, 0, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// Interaction to spike eye speed / blink
+window.addEventListener('pointerdown', ()=>{
+  char.eyeSpeed = 1.6; // momentarily faster
+  // force a blink
+  char.blink = 1;
+  blinkTimer = 120; // frames at ~60fps ~2s? we'll use time-based below, so just quick burst
+  triggeredBlink = true;
+});
+
+let last = performance.now();
+let triggeredBlink = false;
+let blinkTimer = 0;
+
+function frame(now){
+  const dt = Math.min(50, now - last); // ms
+  last = now;
+
+  // Update cloud positions
+  clouds.forEach(c=>{
+    c.x += c.v * dt;
+    if (c.x > W() + 80) { c.x = -100; c.y = Math.random()*H()*0.4 + 20; c.s = Math.random()*0.6 + 0.6; }
+  });
+
+  // Update character animation
+  char.eyePhase += (char.eyeSpeed * dt) / 1000; // rad/sec
+  char.eyeSpeed += (0.6 - char.eyeSpeed) * 0.02; // ease back to normal
+  char.mouthPhase += (1.8 * dt) / 1000; // chew speed
+
+  // Blink logic
+  if (!char.nextBlinkAt) scheduleBlink(now);
+  if (triggeredBlink){
+    char.blink += (1 - char.blink) * 0.5; // close quickly
+    if (char.blink > 0.98){ triggeredBlink = false; scheduleBlink(now+300); }
+  } else if (now > char.nextBlinkAt) {
+    // auto blink
+    char.blink += (1 - char.blink) * 0.5; // closing
+    if (char.blink > 0.98){ scheduleBlink(now + 120 + Math.random()*200); triggeredBlink = false; }
+  } else {
+    char.blink += (0 - char.blink) * 0.18; // open
+  }
+
+  // --- Render ---
+  ctx.clearRect(0,0,W(),H());
+
+  // Background sky
+  ctx.fillStyle = skyGradient();
+  ctx.fillRect(0,0,W(),H());
+
+  // Sun
+  ctx.fillStyle = 'rgba(255,235,150,0.9)';
+  ctx.beginPath(); ctx.arc(W()*0.85, H()*0.18, Math.min(W(),H())*0.06, 0, Math.PI*2); ctx.fill();
+
+  // Clouds
+  clouds.forEach(c=> drawCloud(c.x, c.y, c.s));
+
+  // Hills & grass
+  drawHills();
+  drawGrass(now);
+
+  // Character
+  drawCharacter(now);
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+
+  </script>
+</body>
+</html>
